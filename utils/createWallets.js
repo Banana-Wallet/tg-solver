@@ -1,4 +1,4 @@
-import { Banana, Chains } from "@bananahq/banana-sdk-test";
+import { Banana, Chains } from "@bananahq/banana-sdk-tg-bot";
 import { POLYGON_RPC } from "../constant.js";
 import fs from 'fs'
 import Wallet from "ethereumjs-wallet";

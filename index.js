@@ -1,11 +1,6 @@
 import dotenv from "dotenv";
 import TelegramBot from "node-telegram-bot-api";
-import { welcomeMessage } from "./constant.js";
-// import Wallet from "ethereumjs-wallet";
-// import { ethers } from "ethers";
-// import { Banana, Chains } from "@bananahq/banana-sdk-test";
-// import { POLYGON_RPC, GNOSIS_RPC, OPTIMISM_RPC } from "./constant.js";
-// import { paymasterOptions } from "./constant.js";
+import { polygonAddresses, welcomeMessage } from "./constant.js";
 import { transpile } from "./solver/transpileIntentToATO.js";
 import { swapTxnDataExtractor } from "./solver/account-abstraction/swapTxnDataExtractor.js";
 import { checkSimilarity } from "./utils/bigramSimilarity.js";
@@ -19,10 +14,19 @@ import {
   ATOValidationForSwapAndBridge,
 } from "./solver/validation/ATOValidation.js";
 import { isJSON } from "./constant.js";
-import { constructSwapTransaction } from "./solver/transactions/swapTransactions.js";
 import { intentSteps } from "./constant.js";
 import { constructSwapAndBridgeTransaction } from "./solver/transactions/bridgeAndSwapTransactions.js";
-// import { ATOToSwapTranspiler } from "./utils/ATOtoSwapData.js";
+import {
+  preFormedPrompt_1_ATO,
+  preFormedPrompt_2_ATO,
+  preFormedPrompt_3_ATO,
+} from "./constant.js";
+import { addSpaceBetweenNumberAndText } from "./utils/utils.js";
+import { walletBalanceMessage } from "./constant.js";
+import { sendTransaction } from "./solver/account-abstraction/sendTransaction.js";
+import { ATOIntegrityValidation } from "./solver/validation/ATOExtractedDataFixes.js";
+import { constructBridgeTransaction } from "./solver/transactions/bridgeTransaction.js"; // bridging via wormhole
+import { constructStakeTransaction } from "./solver/transactions/staketransaction.js";
 
 dotenv.config();
 
@@ -38,20 +42,451 @@ const env = process.env.ENV;
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 
 const prompt1 = "Swap 0.1 USDC to USDT on Polygon";
-const prompt2 = "Get half of my USDC from polygon to Gnosis";
-const prompt3 = "Send 0.1 USDC on Polygon from Gnosis USDT balance";
+const prompt2 = "Get most of my USDC from polygon to gnosis";
+const prompt3 = "Send 0.4 USDC on Gnosis from Polygon USDT balance";
+const prompt4 = "Stake 0.4 USDC on lido";
+
+const SOCKET_SCAN_BASEURL = "https://socketscan.io/tx/";
 
 const users = [];
 let userQuestionStates = {};
 let userIntentConfirmation = {
-  executeIntent: false,
+  executeIntent: 0, // 0: null action, 1: confirmed, 2: rejected
   isIntentProcessing: false,
 };
 let userCurrentBalance = {};
 
-// const intentExecution = (bot, chatId, intent, userAddress) => {
+const executeStakeTransaction = async (bot, chatId, userMeta) => {
+    const swapUSDCToMatiCData = {
+        chain: 137,
+        pair: ['USDC', 'MATIC'],
+        tokenAddress1: polygonAddresses['USDC'],
+        tokenAddress2: polygonAddresses['MATIC'],
+        amount: '0.4',
+        userAddress: userMeta.scaAddress // for now     
+    }
+    bot.sendMessage(chatId, "Finding the best execution path..🛠️");
+    let txnConstructionResponse = await constructSwapTransaction(swapUSDCToMatiCData);
 
-// }
+    if(!txnConstructionResponse.success) {
+        bot.sendMessage(chatId, 'Unfortunately swapping transaction construction failed');
+        return;
+    }
+
+    let context = []
+    let transactions = [];
+    context = [...txnConstructionResponse.context]
+    transactions = [...txnConstructionResponse.transactions];
+
+    txnConstructionResponse = await constructStakeTransaction(swapUSDCToMatiCData);
+
+    if(!txnConstructionResponse.success) {
+        bot.sendMessage(chatId, 'Unfortunately stake transaction construction failed');
+        return;
+    }
+
+    context = [...context, ...txnConstructionResponse.context];
+    transactions = [...transactions, ...txnConstructionResponse.transactions];
+    
+    const intention = intentSteps(context);
+    //! confirmation from user
+    // console.log("this is swap txn ", txnConstruction);
+
+    const optsForConfirmation = getOptsForConfirmation();
+    bot.sendMessage(chatId, intention, optsForConfirmation);
+
+    const confirmation = await waitForConfirmation(chatId);
+
+    if (!confirmation) {
+      bot.sendMessage(chatId, "Transaction cancelled");
+      return;
+    }
+
+    bot.sendMessage(chatId, "Transaction confirmed");
+    txnConstructionResponse.transactions = transactions;
+
+    try {
+        txnLink = await sendTransaction(txnConstructionResponse, userMeta);
+        console.log("this is txn link ", txnLink);
+      } catch (err) {
+        console.log("err in txn", err);
+        bot.sendMessage(
+          chatId,
+          "Unfortunately txn didn't executed successfully!"
+        );
+        return;
+      }
+    bot.sendMessage(chatId, "Intent executed..🏁");
+    await delay(1000);
+    bot.sendMessage(chatId, `Txn link: ${txnLink.txnLink}`);
+};
+
+const intentExecution = async (
+  bot,
+  chatId,
+  intent,
+  userAddress,
+  direct = false
+) => {
+  if (Object.keys(userIntentConfirmation).includes(String(chatId))) {
+    if (userIntentConfirmation[chatId].isIntentProcessing) {
+      bot.sendMessage(chatId, "Previous intent already in process !!");
+      return;
+    }
+  }
+
+  const userMeta = users.find((userData) => userData.chatId === chatId);
+
+  userIntentConfirmation[chatId] = {
+    executeIntent: 0,
+    isIntentProcessing: true,
+  };
+
+  bot.sendMessage(chatId, "Finding the best execution path..🛠️");
+
+  const userBalances = await getTokenBalances(userAddress);
+  let intentATOs = await transpile(intent, userAddress, direct, userBalances);
+
+  console.log("these are intent ATos;", intentATOs);
+  bot.sendMessage(chatId, "Finding best protocols for executions..✔️");
+  await delay(500);
+
+  console.log("this is intent ato ", intentATOs);
+
+  let swapData = "",
+    bridgeData = "";
+
+  try {
+    if (intentATOs.length === 1) {
+      // for bridge or swap
+      if (
+        checkSimilarity(intentATOs[0].operation, "SWAP") >
+        checkSimilarity(intentATOs[0].operation, "BRIDGE")
+      ) {
+        let fixableIntent = intentATOs[0];
+
+        console.log("this is user balance ", userBalances);
+
+        console.log("this is zereo ato", intentATOs[0]);
+        const questions = ATOValidationForSwap(fixableIntent, userBalances);
+        console.log("question to be asked for ATO filling", questions);
+
+        userQuestionStates[chatId] = [...questions];
+
+        for (let i = 0; i < userQuestionStates[chatId].length; i++) {
+          const ATOField = userQuestionStates[chatId][i].field;
+
+          if (userQuestionStates[chatId][i].options.length === 0) {
+            bot.sendMessage(
+              chatId,
+              "Oops!. Your wallet do not have sufficient funds to execute this transaction. Please check wallet balance with /balance command."
+            );
+            return;
+          }
+
+          const opts = buildOptsForQuestion(
+            i,
+            userQuestionStates[chatId][i].options
+          );
+          bot.sendMessage(chatId, userQuestionStates[chatId][i].text, opts);
+          await waitForAnswer(chatId, i);
+          // now we have the ans
+          fixableIntent[ATOField] = userQuestionStates[chatId][i].ans;
+        }
+
+        bot.sendMessage(chatId, "Validating execution path..✅");
+        await delay(500);
+
+        //! need to make sure we are passsing valie ATO
+        swapData = swapTxnDataExtractor(
+          fixableIntent,
+          userAddress,
+          userBalances
+        );
+        console.log("thos is swap data", swapData);
+
+        const { isError, errorReason } = ATOIntegrityValidation(
+          swapData,
+          false,
+          userBalances
+        );
+
+        if (isError) {
+          bot.sendMessage(chatId, errorReason);
+          return;
+        }
+
+        //! handle the case when the construction has failed
+        let txnConstructionResponse = await constructSwapTransaction(swapData);
+
+        if (!txnConstructionResponse.success) {
+          bot.sendMessage(
+            chatId,
+            "Unfortunately avalaible Solvers weren't able to find efficient route for your txn. try increasing the amount for swap/bridge.. ❌"
+          );
+          return;
+        }
+
+        bot.sendMessage(chatId, "Txns constructed..👷");
+
+        const intention = intentSteps(txnConstructionResponse.context);
+        //! confirmation from user
+        // console.log("this is swap txn ", txnConstruction);
+
+        const optsForConfirmation = getOptsForConfirmation();
+        bot.sendMessage(chatId, intention, optsForConfirmation);
+        const confirmation = await waitForConfirmation(chatId);
+
+        if (!confirmation) {
+          bot.sendMessage(chatId, "Transaction cancelled");
+          return;
+        }
+
+        bot.sendMessage(chatId, "Transaction confirmed");
+
+        let txnLink;
+        //! execute her
+        try {
+          txnLink = await sendTransaction(txnConstructionResponse, userMeta);
+
+          console.log("this is txn link ", txnLink);
+        } catch (err) {
+          console.log("err in txn", err);
+          bot.sendMessage(
+            chatId,
+            "Unfortunately txn didn't executed successfully!"
+          );
+          return;
+        }
+        bot.sendMessage(chatId, "Intent executed..🏁");
+        await delay(1000);
+        bot.sendMessage(chatId, `Txn link: ${txnLink.txnLink}`);
+      } else {
+        // const userBalances = await getTokenBalances(userAddress);
+        console.log("this is user balance ", userBalances);
+
+        const questions = ATOValidationForSwapAndBridge(
+          intentATOs,
+          userBalances
+        );
+        console.log("questions to be asked for ATO filling", questions);
+        userQuestionStates[chatId] = [...questions];
+        let fixableIntent = intentATOs;
+
+        for (let i = 0; i < userQuestionStates[chatId].length; i++) {
+          const ATOField = userQuestionStates[chatId][i].field;
+
+          if (userQuestionStates[chatId][i].options.length === 0) {
+            bot.sendMessage(
+              chatId,
+              "Oops!. Your wallet do not have sufficient funds to execute this transaction. Please check wallet balance with /balance command."
+            );
+            return;
+          }
+
+          const opts = buildOptsForQuestion(
+            i,
+            userQuestionStates[chatId][i].options
+          );
+          bot.sendMessage(chatId, userQuestionStates[chatId][i].text, opts);
+          await waitForAnswer(chatId, i);
+          fixableIntent[0][ATOField] = userQuestionStates[chatId][i].ans;
+        }
+
+        bot.sendMessage(chatId, "Validating execution path..✅");
+        await delay(500);
+
+        //! need to make sure we are passing valid ATO
+        bridgeData = bridgeAndSwapTxnExtractor(
+          fixableIntent,
+          userAddress,
+          userBalances
+        );
+
+        console.log("this is final bridge data ", bridgeData);
+
+        const { isError, errorReason } = ATOIntegrityValidation(
+          bridgeData,
+          true,
+          userBalances
+        );
+
+        if (isError) {
+          bot.sendMessage(chatId, errorReason);
+          return;
+        }
+
+        //! constructing txn here
+        const txnConstructionResponse = await constructSwapAndBridgeTransaction(
+          bridgeData
+        );
+
+        // const txnConstructionResponse = constructBridgeTransaction(
+        //     bridgeData
+        // );
+
+        console.log('this is txn construction response ', txnConstructionResponse)
+
+        if (!txnConstructionResponse.success) {
+          bot.sendMessage(
+            chatId,
+            "Unfortunately avalaible Solvers weren't able to find efficient route for your txn. try increasing the amount for swap/bridge"
+          );
+          return;
+        }
+
+        bot.sendMessage(chatId, "Txns constructed..👷");
+
+        const intention = intentSteps(txnConstructionResponse.context);
+        const optsForConfirmation = getOptsForConfirmation();
+        bot.sendMessage(chatId, intention, optsForConfirmation);
+        const confirmation = await waitForConfirmation(chatId);
+
+        if (!confirmation) {
+          bot.sendMessage(chatId, "Transaction cancelled");
+          return;
+        }
+
+        bot.sendMessage(chatId, "Transaction confirmed");
+
+        let txnLink;
+        //! execute her
+        try {
+          txnLink = await sendTransaction(txnConstructionResponse, userMeta);
+          console.log("this is txn link ", txnLink);
+        } catch (err) {
+          console.log("err in txn", err);
+          bot.sendMessage(
+            chatId,
+            "Unfortunately txn didn't executed successfully!"
+          );
+          return;
+        }
+
+        bot.sendMessage(chatId, "Intent executed..🏁");
+        await delay(1000);
+        bot.sendMessage(chatId, `Txn link: ${txnLink.txnLink}`);
+        bot.sendMessage(
+          chatId,
+          `Bridge Scanner: ${SOCKET_SCAN_BASEURL}${txnLink.txnHash}`
+        );
+      }
+
+      console.log("this is data", swapData, bridgeData);
+    } else if (intentATOs.length === 2) {
+      // for bridge and swap
+      //   const userBalances = await getTokenBalances(userAddress);
+      console.log("this is user balance ", userBalances);
+
+      const questions = ATOValidationForSwapAndBridge(intentATOs, userBalances);
+      console.log("questions to be asked for ATO filling", questions);
+
+      userQuestionStates[chatId] = [...questions];
+      let fixableIntent = intentATOs;
+
+      for (let i = 0; i < userQuestionStates[chatId].length; i++) {
+        const ATOField = userQuestionStates[chatId][i].field;
+        const ATOIndex = userQuestionStates[chatId][i].index;
+
+        if (userQuestionStates[chatId][i].options.length === 0) {
+          bot.sendMessage(
+            chatId,
+            "Oops!. Your wallet do not have sufficient funds to execute this transaction. Please check wallet balance with /balance command"
+          );
+          return;
+        }
+
+        const opts = buildOptsForQuestion(
+          i,
+          userQuestionStates[chatId][i].options
+        );
+        bot.sendMessage(chatId, userQuestionStates[chatId][i].text, opts);
+        await waitForAnswer(chatId, i);
+        // now we have the ans
+        fixableIntent[ATOIndex][ATOField] = userQuestionStates[chatId][i].ans;
+      }
+
+      bot.sendMessage(chatId, "Validating execution path..✅");
+      await delay(500);
+
+      bridgeData = bridgeAndSwapTxnExtractor(
+        fixableIntent,
+        userAddress,
+        userBalances
+      );
+      console.log("this is final bridge data what ever it is", bridgeData);
+
+      const { isError, errorReason } = ATOIntegrityValidation(
+        bridgeData,
+        true,
+        userBalances
+      );
+
+      if (isError) {
+        bot.sendMessage(chatId, errorReason);
+        return;
+      }
+
+      const txnConstructionResponse = await constructSwapAndBridgeTransaction(
+        bridgeData
+      );
+
+      if (!txnConstructionResponse.success) {
+        bot.sendMessage(
+          chatId,
+          "Unfortunately avalaible Solvers weren't able to find efficient route for your txn. try increasing the amount for swap/bridge"
+        );
+        return;
+      }
+
+      const intention = intentSteps(txnConstructionResponse.context);
+
+      const optsForConfirmation = getOptsForConfirmation();
+      bot.sendMessage(chatId, intention, optsForConfirmation);
+
+      const confirmation = await waitForConfirmation(chatId);
+      if (!confirmation) {
+        bot.sendMessage(chatId, "Transaction cancelled");
+        return;
+      }
+
+      bot.sendMessage(chatId, "Transaction confirmed");
+
+      let txnLink;
+      //! execute her
+      try {
+        txnLink = await sendTransaction(txnConstructionResponse, userMeta);
+        console.log("this is txn link ", txnLink);
+      } catch (err) {
+        console.log("err in txn", err);
+        bot.sendMessage(
+          chatId,
+          "Unfortunately txn didn't executed successfully!"
+        );
+        return;
+      }
+
+      bot.sendMessage(chatId, "Intent executed..🏁");
+      await delay(1000);
+      bot.sendMessage(chatId, `Txn link: ${txnLink.txnLink}`);
+      bot.sendMessage(
+        chatId,
+        `Bridge Scanner: ${SOCKET_SCAN_BASEURL}${txnLink.txnHash}`
+      );
+    } else {
+      bot.sendMessage(
+        chatId,
+        "🛑 Platform don't supported this types of actions for now !! 🛑"
+      );
+    }
+  } catch (err) {
+    console.log("this is the errior received ", err);
+    bot.sendMessage(chatId, "🛑 Bot doesn't support this action for now!. 🛑");
+  }
+  //clean up
+  userQuestionStates[chatId] = [];
+  userIntentConfirmation[chatId].isIntentProcessing = false;
+};
 
 bot.onText(/\/start/, async (msg) => {
   const chatId = msg.chat.id;
@@ -68,8 +503,9 @@ bot.onText(/\/start/, async (msg) => {
       userScaAddress = userMeta.scaAddress;
     } else {
       const randomValue = getRandomValue();
-      const wallet = wallets[randomValue % 20];
-      userScaAddress = "0xe407F56Df5825a7454e266cb2a83D9e3A7c31FF7";
+      //   const wallet = wallets[randomValue % 20];
+      const wallet = wallets[1]; // wallet with index 1 temporary
+      userScaAddress = wallet.scaAddress;
 
       users.push({
         chatId,
@@ -91,13 +527,33 @@ bot.onText(/\/start/, async (msg) => {
         [{ text: `${prompt1}`, callback_data: "preFormedPrompt_1" }],
         [{ text: `${prompt2}`, callback_data: "preFormedPrompt_2" }],
         [{ text: `${prompt3}`, callback_data: "preFormedPrompt_3" }],
+        [{ text: `${prompt4}`, callback_data: "preFormedPrompt_4" }],
       ],
     },
   };
 
-  const greetMessage = welcomeMessage(userScaAddress);
+  let tokenBalances = await getTokenBalances(userScaAddress);
+
+  const greetMessage = welcomeMessage(userScaAddress, tokenBalances);
 
   bot.sendMessage(chatId, greetMessage, preformedOpts);
+});
+
+bot.onText(/\/balance/, async (msg) => {
+  const chatId = msg.chat.id;
+  const userMeta = users.find((userData) => userData.chatId === chatId);
+
+  if (!userMeta) {
+    bot.sendMessage(chatId, "Wallet not initialized use /start to initialize");
+    return;
+  }
+
+  bot.sendMessage(chatId, "Loading balances..");
+  const tokenBalances = await getTokenBalances(userMeta.scaAddress);
+  bot.sendMessage(
+    chatId,
+    walletBalanceMessage(userMeta.scaAddress, tokenBalances)
+  );
 });
 
 const buildOptsForQuestion = (questionNo, options) => {
@@ -125,8 +581,8 @@ const getOptsForConfirmation = () => {
     parse_mode: "Markdown",
     reply_markup: {
       inline_keyboard: [
-        [{ text: `confirm`, callback_data: "confirm" }],
-        [{ text: `cancell`, callback_data: "cancell" }],
+        [{ text: `Confirm ✅`, callback_data: "confirm" }],
+        [{ text: `Reject ❌`, callback_data: "cancell" }],
       ],
     },
   };
@@ -143,23 +599,23 @@ const waitForAnswer = async (chatId, qno) => {
 };
 
 const waitForConfirmation = async (chatId) => {
-  while (!userIntentConfirmation[chatId].executeIntent) {
+  while (userIntentConfirmation[chatId].executeIntent === 0) {
     await delay(1000);
   }
+
+  return userIntentConfirmation[chatId].executeIntent === 1;
 };
 
 bot.on("message", async (msg) => {
   const chatId = msg.chat.id;
-  if (msg.text === "/start") return;
+  if (msg.text === "/start" || msg.text === "/balance") return;
 
   const userMeta = users.find((userData) => userData.chatId === chatId);
 
   console.log("thjis is userr meta", userMeta);
 
-  //   return; //! just for now
-
   if (!userMeta) {
-    bot.sendMessage(chatId, "Wallet not initialized");
+    bot.sendMessage(chatId, "Wallet not initialized use /start to initialize");
     return;
   }
 
@@ -175,205 +631,23 @@ bot.on("message", async (msg) => {
     Object.keys(userIntentConfirmation).includes(chatId)
   );
 
-  if (Object.keys(userIntentConfirmation).includes(String(chatId))) {
-    console.log("it shouldn be here ", chatId, userIntentConfirmation[chatId]);
-    if (userIntentConfirmation[chatId].isIntentProcessing) {
-      bot.sendMessage(chatId, "Previous intent already in processing !!");
-      return;
-    }
-  }
+  const intent = addSpaceBetweenNumberAndText(msg.text);
+  console.log("Processed intent: ", intent);
 
-  console.log("random shit by user", msg);
-  userIntentConfirmation[chatId] = {
-    executeIntent: false,
-    isIntentProcessing: true,
-  };
+  await intentExecution(bot, chatId, intent, userMeta.scaAddress);
 
-  bot.sendMessage(chatId, "Intent decoding started..");
-
-
-
-
-
-
-
-  let intentATOs = await transpile(msg.text, publicAddress);
-  console.log("these are intent ATos;", intentATOs);
-  bot.sendMessage(chatId, "intent decoded into transaction..");
-
-  console.log("this is intent ato ", intentATOs);
-
-  let swapData,
-    bridgeData = "";
-
-  try {
-    if (intentATOs.length === 1) {
-      // for bridge or swap
-      if (
-        checkSimilarity(intentATOs[0].operation, "SWAP") >
-        checkSimilarity(intentATOs[0].operation, "BRIDGE")
-      ) {
-        let fixableIntent = intentATOs[0];
-
-        const userBalances = await getTokenBalances(userMeta.scaAddress);
-        bot.sendMessage(chatId, "Fetched latest wallet balance");
-        console.log("this is user balance ", userBalances);
-
-        console.log("this is zereo ato", intentATOs[0]);
-        const questions = ATOValidationForSwap(fixableIntent, userBalances);
-        console.log("question to be asked for ATO filling", questions);
-
-        userQuestionStates[chatId] = [...questions];
-        for (let i = 0; i < userQuestionStates[chatId].length; i++) {
-          const ATOField = userQuestionStates[chatId][i].field;
-          const opts = buildOptsForQuestion(
-            i,
-            userQuestionStates[chatId][i].options
-          );
-          bot.sendMessage(chatId, userQuestionStates[chatId][i].text, opts);
-          await waitForAnswer(chatId, i);
-          // now we have the ans
-          fixableIntent[ATOField] = userQuestionStates[chatId][i].ans;
-        }
-
-        bot.sendMessage(chatId, "Intent validated");
-
-        //! need to make sure we are passsing valie ATO
-        swapData = swapTxnDataExtractor(
-          fixableIntent,
-          userMeta.scaAddress,
-          userBalances
-        );
-        console.log("thos is swap data", swapData);
-
-        //! here we will have to do some stuff for state mangement thing
-        //! handle if the api request failed here
-        //! amount wala issue
-        const txnConstructionResponse = await constructSwapTransaction(
-          swapData
-        );
-        bot.sendMessage(chatId, "Txn constructed");
-        const intention = intentSteps(txnConstructionResponse.context);
-        //! confirmation from user
-        // console.log("this is swap txn ", txnConstruction);
-
-        const optsForConfirmation = getOptsForConfirmation();
-        bot.sendMessage(chatId, intention, optsForConfirmation);
-        await waitForConfirmation(chatId);
-
-        bot.sendMessage(chatId, "intent done");
-      } else {
-        const userBalances = await getTokenBalances(userMeta.scaAddress);
-        console.log("this is user balance ", userBalances);
-
-        const questions = ATOValidationForSwapAndBridge(
-          intentATOs,
-          userBalances
-        );
-        console.log("questions to be asked for ATO filling", questions);
-        userQuestionStates[chatId] = [...questions];
-        let fixableIntent = intentATOs;
-
-        for (let i = 0; i < userQuestionStates[chatId].length; i++) {
-          const ATOField = userQuestionStates[chatId][i].field;
-          const opts = buildOptsForQuestion(
-            i,
-            userQuestionStates[chatId][i].options
-          );
-          bot.sendMessage(chatId, userQuestionStates[chatId][i].text, opts);
-          await waitForAnswer(chatId, i);
-          fixableIntent[0][ATOField] = userQuestionStates[chatId][i].ans;
-        }
-
-        //! need to make sure we are passing valid ATO
-        bridgeData = bridgeAndSwapTxnExtractor(
-          fixableIntent,
-          userMeta.scaAddress,
-          userBalances
-        );
-
-        console.log("this is final bridge data ", bridgeData);
-        //! constructing txn here
-
-        const txnConstructionRespons = await constructSwapAndBridgeTransaction(
-          bridgeData
-        );
-
-        const intention = intentSteps(txnConstructionRespons.context);
-        const optsForConfirmation = getOptsForConfirmation();
-        bot.sendMessage(chatId, intention, optsForConfirmation);
-        await waitForConfirmation(chatId);
-
-        bot.sendMessage(chatId, "intent done");
-      }
-
-      console.log("this is data", swapData, bridgeData);
-    } else if (intentATOs.length === 2) {
-      // for bridge and swap
-      const userBalances = await getTokenBalances(userMeta.scaAddress);
-      console.log("this is user balance ", userBalances);
-
-      const questions = ATOValidationForSwapAndBridge(intentATOs, userBalances);
-      console.log("questions to be asked for ATO filling", questions);
-
-      userQuestionStates[chatId] = [...questions];
-      let fixableIntent = intentATOs;
-
-      for (let i = 0; i < userQuestionStates[chatId].length; i++) {
-        const ATOField = userQuestionStates[chatId][i].field;
-        const ATOIndex = userQuestionStates[chatId][i].index;
-        const opts = buildOptsForQuestion(
-          i,
-          userQuestionStates[chatId][i].options
-        );
-        bot.sendMessage(chatId, userQuestionStates[chatId][i].text, opts);
-        await waitForAnswer(chatId, i);
-        // now we have the ans
-        fixableIntent[ATOIndex][ATOField] = userQuestionStates[chatId][i].ans;
-      }
-
-      bridgeData = bridgeAndSwapTxnExtractor(
-        fixableIntent,
-        userMeta.scaAddress,
-        userBalances
-      );
-      console.log("this is final bridge data what ever it is", bridgeData);
-      console.log("this shit is called ");
-
-      const txnConstructionResponse = await constructSwapAndBridgeTransaction(
-        bridgeData
-      );
-      const intention = intentSteps(txnConstructionResponse.context);
-
-      const optsForConfirmation = getOptsForConfirmation();
-      bot.sendMessage(chatId, intention, optsForConfirmation);
-
-      await waitForConfirmation(chatId);
-      bot.sendMessage(chatId, "intent done");
-    } else {
-      bot.sendMessage(
-        chatId,
-        "Platform don't supported this transaction for now !!"
-      );
-    }
-  } catch (err) {
-    console.log("this is the errior received ", err);
-    bot.sendMessage(
-      chatId,
-      "Platform don't support this type of intents for now"
-    );
-  }
   //clean up
   userQuestionStates[chatId] = [];
   userIntentConfirmation[chatId].isIntentProcessing = false;
-
-
 });
 
-bot.on("callback_query", (callbackQuery) => {
+bot.on("callback_query", async (callbackQuery) => {
   const message = callbackQuery.message;
   const chatId = message.chat.id;
   const data = callbackQuery.data;
+
+  console.log("this are users ", users);
+  console.log("current chat id", chatId);
 
   if (isJSON(data)) {
     const { value, text, qno } = JSON.parse(data);
@@ -381,19 +655,121 @@ bot.on("callback_query", (callbackQuery) => {
   } else {
     switch (data) {
       case "preFormedPrompt_1": {
+        const userMeta = users.find((userData) => userData.chatId === chatId);
 
+        if (!userMeta) {
+          bot.sendMessage(
+            chatId,
+            "Wallet not initialized use /start to initialize"
+          );
+          return;
+        }
+
+        await intentExecution(
+          bot,
+          chatId,
+          preFormedPrompt_1_ATO(userMeta.scaAddress),
+          userMeta.scaAddress,
+          true
+        );
+
+        //clean up
+        userQuestionStates[chatId] = [];
+        userIntentConfirmation[chatId].isIntentProcessing = false;
+        return;
       }
       case "preFormedPrompt_2": {
+        const userMeta = users.find((userData) => userData.chatId === chatId);
 
+        if (!userMeta) {
+          bot.sendMessage(
+            chatId,
+            "Wallet not initialized use /start to initialize"
+          );
+          return;
+        }
+
+        await intentExecution(
+          bot,
+          chatId,
+          preFormedPrompt_2_ATO(userMeta.scaAddress),
+          userMeta.scaAddress,
+          true
+        );
+
+        //clean up
+        userQuestionStates[chatId] = [];
+        userIntentConfirmation[chatId].isIntentProcessing = false;
+
+        return;
       }
       case "preFormedPrompt_3": {
+        const userMeta = users.find((userData) => userData.chatId === chatId);
 
+        if (!userMeta) {
+          bot.sendMessage(
+            chatId,
+            "Wallet not initialized use /start to initialize"
+          );
+          return;
+        }
+
+        await intentExecution(
+          bot,
+          chatId,
+          preFormedPrompt_3_ATO(userMeta.scaAddress),
+          userMeta.scaAddress,
+          true
+        );
+
+        //clean up
+        userQuestionStates[chatId] = [];
+        userIntentConfirmation[chatId].isIntentProcessing = false;
+        return;
+      }
+      case "preFormedPrompt_4": {
+
+        const userMeta = users.find((userData) => userData.chatId === chatId);
+
+        if (!userMeta) {
+          bot.sendMessage(
+            chatId,
+            "Wallet not initialized use /start to initialize"
+          );
+          return;
+        }
+
+        userIntentConfirmation[chatId] = {
+            isIntentProcessing: true,
+            executeIntent: 0
+        }
+        // .isIntentProcessing = true;
+        // userIntentConfirmation[chatId].executeIntent = 0;
+        await executeStakeTransaction(bot, chatId, userMeta);
+
+        userQuestionStates[chatId] = [];
+        userIntentConfirmation[chatId].isIntentProcessing = false;
+        return;
       }
       case "confirm": {
-        userIntentConfirmation[chatId].executeIntent = true;
+        if (userIntentConfirmation[chatId]) {
+          userIntentConfirmation[chatId].executeIntent = 1;
+        } else
+          bot.sendMessage(
+            chatId,
+            "Wallet not initialized use /start to initialize"
+          );
+        return;
       }
       case "cancell": {
-        userIntentConfirmation[chatId].executeIntent = false;
+        if (userIntentConfirmation[chatId]) {
+          userIntentConfirmation[chatId].executeIntent = 2;
+        } else
+          bot.sendMessage(
+            chatId,
+            "Wallet not initialized use /start to initialize"
+          );
+        return;
       }
     }
   }

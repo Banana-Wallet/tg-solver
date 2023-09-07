@@ -39,7 +39,7 @@ export const swapTxnDataExtractor = (ATO, userAddress, userBalances) => {
         tokenAddress1,
         tokenAddress2,
         amount: !isAnyOrEmpty(String(ATO.sourceTokenAmount)) ? String(ATO.sourceTokenAmount) : String(ATO.destinationTokenAmount), // stringifying the field no matter what
-        userAddress: '0x89760242096063068dbcA329d192b2Dbfdc43E09' // for now     
+        userAddress: userAddress // for now     
     };
 
     console.log('this is swap data' , swapData);

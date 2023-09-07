@@ -43,7 +43,8 @@ const constructNormalSwapTransaction = async (swapData) => {
   const swapTxn = {
     to: swapTransactionResp.data.tx.to,
     value: swapTransactionResp.data.tx.value,
-    data: swapTransactionResp.data.tx.data
+    data: swapTransactionResp.data.tx.data,
+    gasLimit: '0x55555',
   }
 
   transactions.push(swapTxn);
@@ -52,6 +53,7 @@ const constructNormalSwapTransaction = async (swapData) => {
 
   return {
     success: true,
+    chainId: chain,
     context: [`This transactions would swap your ${swapData.amount} of matic token against ${swapData.pair[1]} token.`],
     transactions
   };
@@ -80,8 +82,12 @@ const constructERC20SwapTransaction = async (swapData) => {
   });
 
   await sleep(1000); // due to 1inch api 1rps limit
+  let approvalTxn = {
+    ...approvalTxnResp.data,
+    gasLimit: '0x55555',
+  };
 
-  transactions.push(approvalTxnResp.data);
+  transactions.push(approvalTxn);
   // console.log(approvalTxnResp.data);
   console.log('these are params ', {
     fromTokenAddress: swapData.tokenAddress1,
@@ -117,6 +123,7 @@ const constructERC20SwapTransaction = async (swapData) => {
     to: swapTransactionResp.data.tx.to,
     value: swapTransactionResp.data.tx.value,
     data: swapTransactionResp.data.tx.data,
+    gasLimit: '0x55555',
     gasPrice: swapTransactionResp.data.tx.gasPrice
   }
 
@@ -124,7 +131,8 @@ const constructERC20SwapTransaction = async (swapData) => {
 
   return {
     success: true,
-    context: [`The first transaction would take approval for ${swapData.amount} of ${swapData.pair[0]} token and then it would swap ${swapData.amount} of ${swapData.pair[0]} token for best rates`],
+    chainId: chain,
+    context: [`The first transaction would take approval for ${swapData.amount} of ${swapData.pair[0]} token and then it would swap ${swapData.amount} of ${swapData.pair[0]} token again ${swapData.pair[1]} for best rates`],
     transactions
   }
 }

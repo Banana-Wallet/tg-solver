@@ -6,7 +6,7 @@ import {
   MATIC_USD_FEED_ADDRESS,
   ETH_USD_FEED_ADDRESS,
   XDAI_USD_FEED_ADDRESS,
-} from "../constant";
+} from "../constant.js";
 
 const aggregatorV3InterfaceABI = [
   {

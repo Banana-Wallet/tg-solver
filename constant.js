@@ -1,4 +1,4 @@
-export const welcomeMessage = (scaAddress) => `
+export const welcomeMessage = (scaAddress, balance) => `
 *Welcome to BananaBOT !!* 
 You are now registered. 🎉
 
@@ -7,14 +7,55 @@ Your smart contract wallet address is:
 
 You smart contract wallet has been funded with below funds
 
-You Wallet balance: 
+Polygon wallet Balance:
 
-USDC: 0.5
-USDT: 0.5
-DAI : 0.5
+${balance.Polygon.USDC} USDC
+${balance.Polygon.USDT} USDT
+${balance.Polygon.DAI} DAI
+
+Gnosis wallet Balance:
+
+${balance.Gnosis.USDC} USDC
+${balance.Gnosis.USDT} USDT
+${balance.Gnosis.DAI} DAI
+
+Optimism wallet Balance:
+
+${balance.Optimism.USDC} USDC
+${balance.Optimism.USDT} USDT
+${balance.Optimism.DAI} DAI
+
+We have funded your *Polygon* wallet. if you want to test it on Gnosis and Optimism please fund it accordingly.
+
+Please use below command to use this bot
+
+/start: To initialize wallet
+/balance: To query your wallet balance
 
 *Get started with below prompts:*
 `;
+
+export const walletBalanceMessage = (walletAddress, balance) => `
+SCA: ${walletAddress}
+
+Polygon Balance:
+
+${balance.Polygon.USDC} USDC
+${balance.Polygon.USDT} USDT
+${balance.Polygon.DAI} DAI
+
+Gnosis Balance:
+
+${balance.Gnosis.USDC} USDC
+${balance.Gnosis.USDT} USDT
+${balance.Gnosis.DAI} DAI
+
+Optimism Balanace:
+
+${balance.Optimism.USDC} USDC
+${balance.Optimism.USDT} USDT
+${balance.Optimism.DAI} DAI
+`
 
 export const POLYGON_RPC =
   "https://polygon-mainnet.g.alchemy.com/v2/M6obmh9NhecgkyNlK0G00anwrpBnjzwA";
@@ -27,8 +68,10 @@ export const ETH_RPC =
 export const paymasterOptions = [
   {
     chainId: "137",
-    paymasterUrl: `https://api.pimlico.io/v1/polygon/rpc?apikey=1849c85d-46c8-4bee-8a6d-d6a0cba4d445`,
-    paymasterProvider: "pimlico",
+    paymasterUrl: `https://demo-paymaster.internal.candidelabs.com/polygon/71c6bedc7c3d1c7b4773c70fb972707a`,
+    paymasterProvider: 'candide'
+    // paymasterUrl: `https://api.pimlico.io/v1/polygon/rpc?apikey=1849c85d-46c8-4bee-8a6d-d6a0cba4d445`,
+    // paymasterProvider: "pimlico",
   },
   {
     chainId: "10",
@@ -49,6 +92,7 @@ export const polygonAddresses = {
   DAI: "0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063",
   USDT: "0xc2132D05D31c914a87C6611C10748AEb04B58e8F",
   MATIC: "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",
+  stMATIC: "0x3A58a54C066FdC0f2D55FC9C89F0415C92eBf3C4"
 };
 
 export const optimismAddresses = {
@@ -79,16 +123,16 @@ export const OneInchApiswapUrl = (chain) =>
 
 export const SOCKET_BASEURL = 'https://api.socket.tech';
 
-const prompt1 = "Swap 0.1 USDC to DAI on Polygon";
-const prompt2 = "Get half of my USDC from polygon to Gnosis";
-const prompt3 = "Send 0.1 USDC on Polygon from Gnosis USDT balance";
+// const prompt1 = "Swap 0.1 USDC to DAI on Polygon";
+// const prompt2 = "Get half of my USDC from polygon to Gnosis";
+// const prompt3 = "Send 0.1 USDC on Polygon from Gnosis USDT balance";
 
 export const preFormedPrompt_1_ATO = (tokenOwner) => [{
     'operation': 'SWAP',
     'sourceToken': 'USDC',
     'sourceTokenAmount': '0.1',
     'sourceChain': 'POLYGON',
-    'destinationChain': 'USDT',
+    'destinationToken': 'USDT',
     'destinationTokenAmount': 'any',
     'tokenOwner': tokenOwner,
     'slippage': 'DEFAULT',
@@ -98,9 +142,9 @@ export const preFormedPrompt_1_ATO = (tokenOwner) => [{
 export const preFormedPrompt_2_ATO = (tokenOwner) => [{
     'operation': 'BRIDGE',
     'sourceChain': 'POLYGON',
-    'destinationChain': 'GNOSIS',
+    'destinationChain': 'GNOSIS', //! change it to gnosis
     'token': 'USDC',
-    'tokenAmount': '0.25',
+    'tokenAmount': '0.4',
     'sourceOwner': tokenOwner,
     'destinationOwner': tokenOwner,
     'delay': 'DEFAULT',
@@ -113,9 +157,9 @@ export const preFormedPrompt_2_ATO = (tokenOwner) => [{
 export const preFormedPrompt_3_ATO  = (tokenOwner) => [{
     'operation': 'SWAP',
     'sourceToken': 'USDT',
-    'sourceTokenAmount': '0.1',
-    'sourceChain': 'GNOSIS',
-    'destinationChain': 'USDC',
+    'sourceTokenAmount': '0.4',
+    'sourceChain': 'POLYGON',
+    'destinationToken': 'USDC',
     'destinationTokenAmount': 'any',
     'tokenOwner': tokenOwner,
     'slippage': 'DEFAULT',
@@ -123,10 +167,10 @@ export const preFormedPrompt_3_ATO  = (tokenOwner) => [{
 },
 {
     'operation': 'BRIDGE',
-    'sourceChain': 'GNOSIS',
-    'destinationChain': 'POLYGON',
+    'sourceChain': 'POLYGON',
+    'destinationChain': 'GNOSIS',
     'token': 'USDC',
-    'tokenAmount': '0.1',
+    'tokenAmount': '0.4',
     'sourceOwner': tokenOwner,
     'destinationOwner': tokenOwner,
     'delay': 'DEFAULT',
@@ -142,7 +186,8 @@ export const WALLET_META = [{ chain: 'Polygon', balance: '0.5 USDC, 0.5 USDT, 0.
 export const CHAINS = [
     { name: 'Polygon', chainId: 137 },
     { name: 'Optimism', chainId: 10 },
-    { name: 'Gnosis', chainId: 100 }
+    { name: 'Gnosis', chainId: 100 },
+    { name: 'Matic', chainId: 137 }
 ];
 
 export const SOCKET_ALLOWANCE_TARGET = '0x3a23F943181408EAC424116Af7b7790c94Cb97a5'
@@ -164,13 +209,34 @@ export const intentSteps = (steps) => {
 
     if(steps.length > 1) {
         steps.map((step, index) => {
-            intention = intention + `${index + 1}: ${step}. \n`;
+            intention = intention + `${index + 1}: ${step.trim()}. \n`;
         });
 
         return intention;
     } 
 
-    intention = `${steps[0]}`;
+    intention = `${steps[0].trim()}`;
 
     return intention;
 }
+
+export const WORMHOLE_CHAINS_ID = [
+    {
+        name: 'Polygon',
+        chainId: 137,
+        wormholeChainId: 5
+    },
+    {
+        name: 'Gnosis',
+        chainId: 100,
+        wormholeChainId: 25
+    }, 
+    {
+        name: 'Optimism',
+        chainId: 10,
+        wormholeChainId: 24
+    }
+];
+
+export const POLYGON_WORMHOLE_BANANA = '0x5B7fc5809ad18E5b642e6b19191c23880b40324B'
+export const ENSO_ROUTE_API = 'https://api.enso.finance/api/v1/shortcuts/route'

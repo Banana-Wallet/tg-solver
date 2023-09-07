@@ -12,10 +12,12 @@
   "author": "nlok5923 <nitanshu@rizelabs.io>",
   "license": "MIT",
   "dependencies": {
+    "@bananahq/banana-sdk-tg-bot": "^0.0.6",
     "axios": "^1.5.0",
     "dotenv": "^16.3.1",
     "ethereumjs-wallet": "^1.0.2",
     "ethers": "^5.7.2",
+    "langchain": "^0.0.141",
     "node-telegram-bot-api": "^0.61.0",
     "uuid": "^9.0.0"
   }

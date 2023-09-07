@@ -198,22 +198,24 @@ export const constructSwapAndBridgeTransaction = async (swapAndBridgeData) => {
       const approvalTxn = {
         to: approvalTransactionData.result.to,
         data: approvalTransactionData.result.data,
-        value: "0x",
+        value: "0",
+        gasLimit: '0x55555'
       };
 
-      let approvalContext = `Taking approval for ${minimumApprovalAmount} ${sourceToken} to the Gateway contract`;
+      let approvalContext = `Taking approval for ${String(Number(minimumApprovalAmount) / 10 ** 6)} ${sourceToken} to the Gateway contract`;
       context.push(approvalContext);
       txns.push(approvalTxn)
     }
   }
 
-  let bridgeContext = `Bridging ${tokenAmount} ${sourceToken} using ${route.usedBridgeNames.map((bridgeName) => `${bridgeName}, `)}`;
+  let bridgeContext = `Bridging ${tokenAmount} ${sourceToken} using ${route.usedBridgeNames.map((bridgeName) => `${bridgeName} `)}`;
   context.push(bridgeContext);
 
   const bridgeTxn = {
     to: txnData.result.txTarget,
     data: txnData.result.txData,
-    value: txnData.result.value,
+    value: '0',
+    gasLimit: '0x55555'
   };
 
   txns.push(bridgeTxn);
@@ -227,8 +229,9 @@ export const constructSwapAndBridgeTransaction = async (swapAndBridgeData) => {
   return {
     success: true,
     context,
+    chainId: fromChainId,
     transactions: txns
   };
 };
 
-constructSwapAndBridgeTransaction(mockSwapAndBridgeData);
+// constructSwapAndBridgeTransaction(mockSwapAndBridgeData);

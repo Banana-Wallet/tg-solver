@@ -50,7 +50,21 @@ const swapKeysToChecks = ['sourceToken', 'destinationToken', 'sourceChain'];
 const bridgeKeysToCheck = ['sourceChain', 'destinationChain', 'token'];
 
 export const isValueValid = (value) => {
-    return value === '' || value === 'any' || checkChainSimilarity(value)[0].score > 0.2 || checkTokenSimilarity(value)[0].score > 0.2
+
+    value = String(value);
+    // return value === '' || value === 'any' || 
+
+    let isChainSimilar = false, isTokenSimilar = false;
+    if(value) {
+       isChainSimilar = (checkChainSimilarity(value)[0].score > 0.2);
+       isTokenSimilar = (checkTokenSimilarity(value)[0].score > 0.2);
+
+       return isChainSimilar || isTokenSimilar;
+    }
+
+    if(value === '') return true;
+
+    return false;
 }
 
 export const attachMandatoryFieldsForSwap = (ATO) => {
@@ -76,14 +90,6 @@ export const attachMandatoryFieldsForSwap = (ATO) => {
 
 export const attachMandatoryFieldsForSwapAndBridge = (ATO) => {
 
-    // ATO.forEach((obj, index) => {
-    //     Object.keys(obj).map(prop => {
-    //         if(!isValueValid(obj[prop])) {
-    //             obj[prop] = 'any';
-    //         }
-    //     })
-    // });
-
     // only bridge txn
     if(ATO.length === 1) {
         const absentBridgeATOProps = mandatoryBridgeATOProps.filter(prop => !ATO[0].hasOwnProperty(prop));
@@ -107,8 +113,12 @@ export const attachMandatoryFieldsForSwapAndBridge = (ATO) => {
             }
         });
     } else {
-        const absentSwapATOProps = mandatorySwapATOProps.filter(prop => !ATO[0].hasOwnProperty(prop));
-        const absentBridgeATOProps = mandatoryBridgeATOProps.filter(prop => !ATO[1].hasOwnProperty(prop));
+        console.log('ATO reached', ATO);
+        const absentSwapATOProps = mandatorySwapATOProps.filter(prop =>  { console.log('this is prop', prop); console.log(ATO[0].hasOwnProperty(prop));  return !ATO[0].hasOwnProperty(prop) });
+        const absentBridgeATOProps = mandatoryBridgeATOProps.filter(prop => { console.log('this is briudge prpo', prop);  console.log(ATO[1].hasOwnProperty(prop)); return !ATO[1].hasOwnProperty(prop) } );
+
+        console.log('Asbset swap ato props ', absentBridgeATOProps)
+        console.log('bridge ato props ', absentBridgeATOProps)
 
         ATO.forEach((obj, index) => {
             if (index === 0) {
@@ -128,7 +138,11 @@ export const attachMandatoryFieldsForSwapAndBridge = (ATO) => {
 
             if(index === 0) {
                 swapKeysToChecks.map(prop => {
+                    
                     if(!isValueValid(obj[prop])) {
+
+                        console.log('this is value is not valid ', obj[prop], prop);
+
                         obj[prop] = 'any';
                     }
                 })
@@ -137,6 +151,9 @@ export const attachMandatoryFieldsForSwapAndBridge = (ATO) => {
             if(index === 1) {
                 bridgeKeysToCheck.map(prop => {
                     if(!isValueValid(obj[prop])) {
+
+                        console.log('this is value is not valid ', obj[prop], prop);
+
                         obj[prop] = 'any';
                     }
                 })
@@ -150,12 +167,18 @@ export const attachMandatoryFieldsForSwapAndBridge = (ATO) => {
 export const ATOValidationForSwap = (ATO, userBalances) => {
 
     let questions = [];
+ 
     // const mandatorySwapATOProps = ['operation', 'sourceToken', 'sourceTokenAmount', 'sourceChain', 'destinationToken', 'destinationTokenAmount', 'tokenOwner'];
 
     // const absentSwapATOProps = mandatorySwapATOProps.filter(prop => !ATO.hasOwnProperty(prop));
 
     if(ATO.length > 2) return 'Invalid ATO provided'; 
     const swapATO = ATO;
+
+    const chain = checkChainSimilarity(swapATO.sourceChain)[0].name;
+    const token = checkTokenSimilarity(swapATO.sourceToken)[0].name;
+    const userSourceTokenBalance = userBalances[chain][token];
+
     console.log('this is ATO', ATO);
 
     if(isAnyOrEmpty(swapATO.destinationToken) && isAnyOrEmpty(swapATO.sourceToken)) {
@@ -186,7 +209,7 @@ export const ATOValidationForSwap = (ATO, userBalances) => {
             ans: '',
             options: tokens,
             index: 0,
-            field: 'sourceToken'
+            field: 'destinationToken'
         });
     }
 
@@ -201,7 +224,7 @@ export const ATOValidationForSwap = (ATO, userBalances) => {
             ans: '',
             options: tokens,
             index: 0,
-            field: 'destinationToken'
+            field: 'sourceToken'
         })
     };
 
@@ -209,7 +232,7 @@ export const ATOValidationForSwap = (ATO, userBalances) => {
         questions.push({
             text: `How many token you want to swap ?`,
             ans: '',
-            options: ['0.1', '0.2', '0.3'], // need to get it confirmed from the user balance get the lowest balance here and then make the options basedn on it
+            options: getBalanceOptions(Number(userSourceTokenBalance)), // need to get it confirmed from the user balance get the lowest balance here and then make the options basedn on it
             index: 0,
             field: 'destinationTokenAmount'
         });
