@@ -139,19 +139,34 @@ export const preFormedPrompt_1_ATO = (tokenOwner) => [{
     'rate': 'DEFAULT'
 }];
 
+// export const preFormedPrompt_2_ATO = (tokenOwner) => [{
+//     'operation': 'BRIDGE',
+//     'sourceChain': 'POLYGON',
+//     'destinationChain': 'GNOSIS', //! change it to gnosis
+//     'token': 'USDC',
+//     'tokenAmount': '0.4',
+//     'sourceOwner': tokenOwner,
+//     'destinationOwner': tokenOwner,
+//     'delay': 'DEFAULT',
+//     'reputation': 'DEFAULT',
+//     'rate': 'DEFAULT',
+//     'fees': 'DEFAULT',
+//     'slippage': 'DEFAULT',
+// }];
+
 export const preFormedPrompt_2_ATO = (tokenOwner) => [{
-    'operation': 'BRIDGE',
-    'sourceChain': 'POLYGON',
-    'destinationChain': 'GNOSIS', //! change it to gnosis
-    'token': 'USDC',
-    'tokenAmount': '0.4',
-    'sourceOwner': tokenOwner,
-    'destinationOwner': tokenOwner,
-    'delay': 'DEFAULT',
-    'reputation': 'DEFAULT',
-    'rate': 'DEFAULT',
-    'fees': 'DEFAULT',
-    'slippage': 'DEFAULT',
+  'operation': 'BRIDGE',
+  'sourceChain': 'POLYGON',
+  'destinationChain': 'OPTIMISM', //! change it to gnosis
+  'token': 'USDC',
+  'tokenAmount': '0.4',
+  'sourceOwner': tokenOwner,
+  'destinationOwner': tokenOwner,
+  'delay': 'DEFAULT',
+  'reputation': 'DEFAULT',
+  'rate': 'DEFAULT',
+  'fees': 'DEFAULT',
+  'slippage': 'DEFAULT',
 }];
 
 export const preFormedPrompt_3_ATO  = (tokenOwner) => [{

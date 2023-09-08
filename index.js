@@ -27,6 +27,7 @@ import { sendTransaction } from "./solver/account-abstraction/sendTransaction.js
 import { ATOIntegrityValidation } from "./solver/validation/ATOExtractedDataFixes.js";
 import { constructBridgeTransaction } from "./solver/transactions/bridgeTransaction.js"; // bridging via wormhole
 import { constructStakeTransaction } from "./solver/transactions/staketransaction.js";
+import { isAllTransactionsInterelated } from "./utils/utils.js";
 
 dotenv.config();
 
@@ -57,68 +58,88 @@ let userIntentConfirmation = {
 let userCurrentBalance = {};
 
 const executeStakeTransaction = async (bot, chatId, userMeta) => {
-    const swapUSDCToMatiCData = {
-        chain: 137,
-        pair: ['USDC', 'MATIC'],
-        tokenAddress1: polygonAddresses['USDC'],
-        tokenAddress2: polygonAddresses['MATIC'],
-        amount: '0.4',
-        userAddress: userMeta.scaAddress // for now     
-    }
-    bot.sendMessage(chatId, "Finding the best execution path..🛠️");
-    let txnConstructionResponse = await constructSwapTransaction(swapUSDCToMatiCData);
+  const swapUSDCToMatiCData = {
+    chain: 137,
+    pair: ["USDC", "MATIC"],
+    tokenAddress1: polygonAddresses["USDC"],
+    tokenAddress2: polygonAddresses["MATIC"],
+    amount: "0.2", // for now
+    userAddress: userMeta.scaAddress, // for now
+  };
+  bot.sendMessage(chatId, "Finding the best execution path..🛠️");
+  let txnConstructionResponse = await constructSwapTransaction(
+    swapUSDCToMatiCData
+  );
 
-    if(!txnConstructionResponse.success) {
-        bot.sendMessage(chatId, 'Unfortunately swapping transaction construction failed');
-        return;
-    }
+  if (!txnConstructionResponse.success) {
+    bot.sendMessage(
+      chatId,
+      "Unfortunately swapping transaction construction failed"
+    );
+    return;
+  }
 
-    let context = []
-    let transactions = [];
-    context = [...txnConstructionResponse.context]
-    transactions = [...txnConstructionResponse.transactions];
+  let txnLink;
 
-    txnConstructionResponse = await constructStakeTransaction(swapUSDCToMatiCData);
+  let context = [];
+  
+  context = [...txnConstructionResponse.context];
+  // transactions = [...txnConstructionResponse.transactions];
 
-    if(!txnConstructionResponse.success) {
-        bot.sendMessage(chatId, 'Unfortunately stake transaction construction failed');
-        return;
-    }
+  let stakeTxnConstructionResponse = await constructStakeTransaction(
+    swapUSDCToMatiCData
+  );
 
-    context = [...context, ...txnConstructionResponse.context];
-    transactions = [...transactions, ...txnConstructionResponse.transactions];
-    
-    const intention = intentSteps(context);
-    //! confirmation from user
-    // console.log("this is swap txn ", txnConstruction);
+  context = [...context, ...stakeTxnConstructionResponse.context];
 
-    const optsForConfirmation = getOptsForConfirmation();
-    bot.sendMessage(chatId, intention, optsForConfirmation);
+  if (!stakeTxnConstructionResponse.success) {
+    bot.sendMessage(
+      chatId,
+      "Unfortunately staking transaction construction failed"
+    );
+    return;
+  }
 
-    const confirmation = await waitForConfirmation(chatId);
+  const intention = intentSteps(context);
+  //! confirmation from user
+  // console.log("this is swap txn ", txnConstruction);
 
-    if (!confirmation) {
-      bot.sendMessage(chatId, "Transaction cancelled");
-      return;
-    }
+  const optsForConfirmation = getOptsForConfirmation();
+  bot.sendMessage(chatId, intention, optsForConfirmation);
 
-    bot.sendMessage(chatId, "Transaction confirmed");
-    txnConstructionResponse.transactions = transactions;
+  const confirmation = await waitForConfirmation(chatId);
 
-    try {
-        txnLink = await sendTransaction(txnConstructionResponse, userMeta);
-        console.log("this is txn link ", txnLink);
-      } catch (err) {
-        console.log("err in txn", err);
-        bot.sendMessage(
-          chatId,
-          "Unfortunately txn didn't executed successfully!"
-        );
-        return;
-      }
-    bot.sendMessage(chatId, "Intent executed..🏁");
-    await delay(1000);
-    bot.sendMessage(chatId, `Txn link: ${txnLink.txnLink}`);
+  if (!confirmation) {
+    bot.sendMessage(chatId, "Transaction cancelled");
+    return;
+  }
+
+  bot.sendMessage(chatId, "Transaction confirmed");
+  // txnConstructionResponse.transactions = transactions;
+
+  try {
+    txnLink = await sendTransaction(txnConstructionResponse, userMeta);
+    console.log("this is txn link ", txnLink);
+  } catch (err) {
+    console.log("err in txn", err);
+    bot.sendMessage(chatId, "Unfortunately txn didn't executed successfully!");
+    return;
+  }
+
+  bot.sendMessage(chatId, `Swapped ${swapUSDCToMatiCData.amount} USDC to MATIC done`);
+
+  try {
+    txnLink = await sendTransaction(stakeTxnConstructionResponse, userMeta);
+    console.log("this is txn link ", txnLink);
+  } catch (err) {
+    console.log("err in txn", err);
+    bot.sendMessage(chatId, "Unfortunately txn didn't executed successfully!");
+    return;
+  }
+
+  bot.sendMessage(chatId, "Intent executed..🏁");
+  await delay(1000);
+  bot.sendMessage(chatId, `Txn link: ${txnLink.txnLink}`);
 };
 
 const intentExecution = async (
@@ -317,15 +338,18 @@ const intentExecution = async (
         }
 
         //! constructing txn here
-        const txnConstructionResponse = await constructSwapAndBridgeTransaction(
-          bridgeData
-        );
-
-        // const txnConstructionResponse = constructBridgeTransaction(
-        //     bridgeData
+        // const txnConstructionResponse = await constructSwapAndBridgeTransaction(
+        //   bridgeData
         // );
 
-        console.log('this is txn construction response ', txnConstructionResponse)
+        const txnConstructionResponse = await constructBridgeTransaction(
+            bridgeData
+        );
+
+        console.log(
+          "this is txn construction response ",
+          txnConstructionResponse
+        );
 
         if (!txnConstructionResponse.success) {
           bot.sendMessage(
@@ -373,7 +397,11 @@ const intentExecution = async (
       }
 
       console.log("this is data", swapData, bridgeData);
-    } else if (intentATOs.length === 2) {
+    } else if (
+      intentATOs.length === 2 &&
+      intentATOs[0].operation === "SWAP" &&
+      intentATOs[1].operation === "BRIDGE"
+    ) {
       // for bridge and swap
       //   const userBalances = await getTokenBalances(userAddress);
       console.log("this is user balance ", userBalances);
@@ -473,6 +501,243 @@ const intentExecution = async (
         chatId,
         `Bridge Scanner: ${SOCKET_SCAN_BASEURL}${txnLink.txnHash}`
       );
+      // intentATOs
+      // we will cater either all swaps (non related) + all bridge (non related)
+    } else if (
+      intentATOs.length >= 2 &&
+      isAllTransactionsInterelated(intentATOs)
+    ) {
+      // let transactions = [], context = [];
+      for (let i = 0; i < intentATOs.length; i++) {
+        if (intentATOs[i].operation === "SWAP") {
+          let fixableIntent = intentATOs[i];
+
+          console.log("this is user balance ", userBalances);
+          bot.sendMessage(chatId, `Starting ${i + 1}th swap transaction`);
+
+          // console.log("this is zereo ato", intentATOs[0]);
+          const questions = ATOValidationForSwap(fixableIntent, userBalances);
+          console.log("question to be asked for ATO filling", questions);
+
+          userQuestionStates[chatId] = [...questions];
+
+          for (let i = 0; i < userQuestionStates[chatId].length; i++) {
+            const ATOField = userQuestionStates[chatId][i].field;
+
+            if (userQuestionStates[chatId][i].options.length === 0) {
+              bot.sendMessage(
+                chatId,
+                "Oops!. Your wallet do not have sufficient funds to execute this transaction. Please check wallet balance with /balance command."
+              );
+              return;
+            }
+
+            const opts = buildOptsForQuestion(
+              i,
+              userQuestionStates[chatId][i].options
+            );
+            bot.sendMessage(chatId, userQuestionStates[chatId][i].text, opts);
+            await waitForAnswer(chatId, i);
+            // now we have the ans
+            fixableIntent[ATOField] = userQuestionStates[chatId][i].ans;
+          }
+
+          bot.sendMessage(
+            chatId,
+            `SWAP ${fixableIntent[0].sourceToken} <> ${fixableIntent[0].destinationToken} on ${fixableIntent[0].sourceChain}`
+          );
+
+          bot.sendMessage(chatId, "Validating execution path..✅");
+          await delay(500);
+
+          let swapData = swapTxnDataExtractor(
+            fixableIntent,
+            userAddress,
+            userBalances
+          );
+
+          const { isError, errorReason } = ATOIntegrityValidation(
+            swapData,
+            false,
+            userBalances
+          );
+
+          if (isError) {
+            bot.sendMessage(chatId, errorReason);
+            // return;
+            continue;
+          }
+
+          let txnConstructionResponse = await constructSwapTransaction(
+            swapData
+          );
+
+          if (!txnConstructionResponse.success) {
+            bot.sendMessage(
+              chatId,
+              "Unfortunately avalaible Solvers weren't able to find efficient route for your txn. try increasing the amount for swap/bridge"
+            );
+            // return;
+            continue;
+          }
+
+          const intention = intentSteps(txnConstructionResponse.context);
+
+          const optsForConfirmation = getOptsForConfirmation();
+          bot.sendMessage(chatId, intention, optsForConfirmation);
+
+          const confirmation = await waitForConfirmation(chatId);
+          if (!confirmation) {
+            bot.sendMessage(chatId, "Transaction cancelled");
+            // return;
+            continue;
+          }
+
+          bot.sendMessage(chatId, "Transaction confirmed");
+
+          let txnLink;
+          //! execute her
+          try {
+            txnLink = await sendTransaction(txnConstructionResponse, userMeta);
+            console.log("this is txn link ", txnLink);
+          } catch (err) {
+            console.log("err in txn", err);
+            bot.sendMessage(
+              chatId,
+              "Unfortunately txn didn't executed successfully!"
+            );
+            // return;
+            continue;
+          }
+
+          bot.sendMessage(chatId, "Intent executed..🏁");
+          await delay(1000);
+          bot.sendMessage(chatId, `Txn link: ${txnLink.txnLink}`);
+
+          userQuestionStates[chatId] = [];
+        } else if (intentATOs[i].operation === "BRIDGE") {
+          bot.sendMessage(chatId, `Starting ${i + 1}th bridge transaction`);
+          let fixableIntent = [intentATOs[i]];
+
+          const questions = ATOValidationForSwapAndBridge(
+            fixableIntent,
+            userBalances
+          );
+          console.log("questions to be asked for ATO filling", questions);
+
+          userQuestionStates[chatId] = [...questions];
+
+          for (let i = 0; i < userQuestionStates[chatId].length; i++) {
+            const ATOField = userQuestionStates[chatId][i].field;
+
+            if (userQuestionStates[chatId][i].options.length === 0) {
+              bot.sendMessage(
+                chatId,
+                "Oops!. Your wallet do not have sufficient funds to execute this transaction. Please check wallet balance with /balance command."
+              );
+              // return;
+              continue;
+            }
+
+            const opts = buildOptsForQuestion(
+              i,
+              userQuestionStates[chatId][i].options
+            );
+            bot.sendMessage(chatId, userQuestionStates[chatId][i].text, opts);
+            await waitForAnswer(chatId, i);
+            fixableIntent[0][ATOField] = userQuestionStates[chatId][i].ans;
+          }
+
+          bot.sendMessage(
+            chatId,
+            `BRIDGE ${fixableIntent[0].token} from ${fixableIntent[0].sourceChain} to ${fixableIntent[0].destinationChain}`
+          );
+
+          bot.sendMessage(chatId, "Validating execution path..✅");
+          await delay(500);
+
+          let bridgeData = bridgeAndSwapTxnExtractor(
+            fixableIntent,
+            userAddress,
+            userBalances
+          );
+
+          const { isError, errorReason } = ATOIntegrityValidation(
+            bridgeData,
+            true,
+            userBalances
+          );
+
+          if (isError) {
+            bot.sendMessage(chatId, errorReason);
+            // return;
+            continue;
+          }
+
+          let txnConstructionResponse = await constructSwapAndBridgeTransaction(
+            bridgeData
+          );
+
+          if (!txnConstructionResponse.success) {
+            bot.sendMessage(
+              chatId,
+              "Unfortunately avalaible Solvers weren't able to find efficient route for your txn. try increasing the amount for swap/bridge"
+            );
+            continue;
+          }
+
+          const intention = intentSteps(txnConstructionResponse.context);
+
+          const optsForConfirmation = getOptsForConfirmation();
+          bot.sendMessage(chatId, intention, optsForConfirmation);
+
+          const confirmation = await waitForConfirmation(chatId);
+          if (!confirmation) {
+            bot.sendMessage(chatId, "Transaction cancelled");
+            // return;
+            continue;
+          }
+
+          bot.sendMessage(chatId, "Transaction confirmed");
+
+          let txnLink;
+          //! execute her
+          try {
+            txnLink = await sendTransaction(txnConstructionResponse, userMeta);
+            console.log("this is txn link ", txnLink);
+          } catch (err) {
+            console.log("err in txn", err);
+            bot.sendMessage(
+              chatId,
+              "Unfortunately txn didn't executed successfully!"
+            );
+            // return;
+            continue;
+          }
+
+          bot.sendMessage(chatId, "Intent executed..🏁");
+          await delay(1000);
+          bot.sendMessage(chatId, `Txn link: ${txnLink.txnLink}`);
+          bot.sendMessage(
+            chatId,
+            `Bridge Scanner: ${SOCKET_SCAN_BASEURL}${txnLink.txnHash}`
+          );
+
+          userQuestionStates[chatId] = [];
+        } else {
+          bot.sendMessage(
+            chatId,
+            "🛑 Platform don't supported this types of actions for now !! 🛑"
+          );
+          break;
+        }
+        bot.sendMessage(
+          chatId,
+          `${i + 1}th transaction executed ${
+            intentATOs.length - (i + 1)
+          } Remaining`
+        );
+      }
     } else {
       bot.sendMessage(
         chatId,
@@ -728,7 +993,6 @@ bot.on("callback_query", async (callbackQuery) => {
         return;
       }
       case "preFormedPrompt_4": {
-
         const userMeta = users.find((userData) => userData.chatId === chatId);
 
         if (!userMeta) {
@@ -740,9 +1004,9 @@ bot.on("callback_query", async (callbackQuery) => {
         }
 
         userIntentConfirmation[chatId] = {
-            isIntentProcessing: true,
-            executeIntent: 0
-        }
+          isIntentProcessing: true,
+          executeIntent: 0,
+        };
         // .isIntentProcessing = true;
         // userIntentConfirmation[chatId].executeIntent = 0;
         await executeStakeTransaction(bot, chatId, userMeta);

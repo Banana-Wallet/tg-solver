@@ -139,7 +139,9 @@ export const transpile = async (intent, userAddress, direct, userBalance) => {
 
         if(finalATO.length === 1 && finalATO[0].operation === 'SWAP') {
             finalATO = attachMandatoryFieldsForSwap(finalATO);
-        } else finalATO = attachMandatoryFieldsForSwapAndBridge(finalATO);
+        } else if(finalATO.length === 2 && finalATO[0].operation === 'SWAP' && finalATO[1].operation === 'BRIDGE') {
+            finalATO = attachMandatoryFieldsForSwapAndBridge(finalATO);
+        }
 
         return finalATO;
     } catch (err) {

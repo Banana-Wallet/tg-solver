@@ -53,6 +53,7 @@ const constructNormalSwapTransaction = async (swapData) => {
 
   return {
     success: true,
+    delegateCall: false,
     chainId: chain,
     context: [`This transactions would swap your ${swapData.amount} of matic token against ${swapData.pair[1]} token.`],
     transactions
@@ -132,6 +133,7 @@ const constructERC20SwapTransaction = async (swapData) => {
   return {
     success: true,
     chainId: chain,
+    delegateCall: false,
     context: [`The first transaction would take approval for ${swapData.amount} of ${swapData.pair[0]} token and then it would swap ${swapData.amount} of ${swapData.pair[0]} token again ${swapData.pair[1]} for best rates`],
     transactions
   }

@@ -129,7 +129,7 @@ export const constructSwapAndBridgeTransaction = async (swapAndBridgeData) => {
   const toChainId = destinationChainId;
   const fromAssetAddress = sourceTokenAddress;
   const toAssetAddress = destinationTokenAddress;
-  const amount = parseTokenAmount(tokenAmount, sourceToken);
+  const amount = parseTokenAmount(String((Number(tokenAmount) - 0.01).toFixed(6)), sourceToken)
   const uniqueRoutesPerBridge = false; // Returns the best route for a given DEX / bridge combination
   const sort = "output"; // "output" | "gas" | "time"
   const singleTxOnly = true;
@@ -208,7 +208,7 @@ export const constructSwapAndBridgeTransaction = async (swapAndBridgeData) => {
     }
   }
 
-  let bridgeContext = `Bridging ${tokenAmount} ${sourceToken} using ${route.usedBridgeNames.map((bridgeName) => `${bridgeName} `)}`;
+  let bridgeContext = `Bridging ${amount} ${sourceToken} using ${route.usedBridgeNames.map((bridgeName) => `${bridgeName} `)}`;
   context.push(bridgeContext);
 
   const bridgeTxn = {
@@ -230,7 +230,8 @@ export const constructSwapAndBridgeTransaction = async (swapAndBridgeData) => {
     success: true,
     context,
     chainId: fromChainId,
-    transactions: txns
+    transactions: txns,
+    delegateCall: false
   };
 };
 

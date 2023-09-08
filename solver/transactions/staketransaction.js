@@ -18,7 +18,7 @@ export const constructStakeTransaction = async (stakingData) => {
     const { amount, userAddress } = stakingData;
     const { ENSO_KEY } = process.env
     const maticInUsdPrice = await getMATICUSDPrice();
-    const maticAmount = String(((parseFloat(1 / maticInUsdPrice.price)) * Number(amount)).toFixed(6))
+    const maticAmount = String((((parseFloat(1 / maticInUsdPrice.price)) * Number(amount)) - 0.05).toFixed(6))
     console.log('this is matic ajount ', maticAmount);
     const maticAddress = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE'
     const stMaticAddress = '0x3A58a54C066FdC0f2D55FC9C89F0415C92eBf3C4'
@@ -53,7 +53,7 @@ export const constructStakeTransaction = async (stakingData) => {
                 tokenInAmountToApprove: ethers.utils.parseEther(maticAmount),
                 tokenInAmountToTransfer: ethers.utils.parseEther(maticAmount),
                 amountIn:  ethers.utils.parseEther(maticAmount),
-                minAmountOut: ethers.utils.parseEther(maticAmount),
+                slippage: 2000,
                 tokenIn: maticAddress,
                 tokenOut: stMaticAddress
             }
@@ -62,6 +62,7 @@ export const constructStakeTransaction = async (stakingData) => {
         console.log('this ios error ', err)
         return {
             success: false,
+            delegateCall: false,
             transactions: []
         }
     }
@@ -81,7 +82,8 @@ export const constructStakeTransaction = async (stakingData) => {
         success: true,
         chainId: 137,
         transactions: [ stakingTxn ],
-        context: [`Staking ${maticAmount} MATIC token to staking platform with enso protocol`]
+        context: [`Staking ${maticAmount} MATIC token to staking platform with enso protocol`],
+        delegateCall: true
     }
 }
 

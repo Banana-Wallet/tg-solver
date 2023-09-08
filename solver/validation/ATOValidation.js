@@ -36,11 +36,12 @@ const getRemainingTokens = (token) => {
 
 const getBalanceOptions = (userBalance) => {
     const interval = 0.1;
-    let avalaibleBalance = [];
+    // let avalaibleBalance = [];
+    let values = [];
     for (let i = interval; i < Number(userBalance); i += interval) {
         values.push(Math.round(i * 10) / 10);  // Rounding to one decimal place
     }
-    return avalaibleBalance;
+    return values;
 }
 
 const mandatorySwapATOProps = ['operation', 'sourceToken', 'sourceTokenAmount', 'sourceChain', 'destinationToken', 'destinationTokenAmount', 'tokenOwner'];
@@ -229,8 +230,10 @@ export const ATOValidationForSwap = (ATO, userBalances) => {
     };
 
     if(isAnyOrEmpty(swapATO.sourceTokenAmount) && isAnyOrEmpty(swapATO.destinationTokenAmount)) {
+        console.log('this is user balanacer ', userSourceTokenBalance)
+        console.log('balance ', userBalances[chain][token], chain, token)
         questions.push({
-            text: `How many token you want to swap ?`,
+            text: `How many token you want to swap for ${swapATO.sourceToken || ''} ${swapATO.destinationToken || ''} ?`,
             ans: '',
             options: getBalanceOptions(Number(userSourceTokenBalance)), // need to get it confirmed from the user balance get the lowest balance here and then make the options basedn on it
             index: 0,
@@ -252,6 +255,7 @@ export const ATOValidationForSwap = (ATO, userBalances) => {
         const chain = checkChainSimilarity(swapATO.sourceChain)[0].name;
         const token = checkTokenSimilarity(swapATO.sourceToken)[0].name;
         const userSourceTokenBalance = userBalances[chain][token];
+        // console.log()
 
         if(Number(userSourceTokenBalance) < Number(swapATO.sourceTokenAmount)) {
             questions.push({

@@ -38,3 +38,17 @@ export const addSpaceBetweenNumberAndText = (str) => {
 
     return str;
 }
+
+export const isAllTransactionsInterelated = (txns) => {
+    let isRelated = true;
+    let prevTxn = txns[0];
+    
+    txns.map(txn => {
+        if(prevTxn.operation !== txn.operation) {
+            isRelated = false;
+        } 
+        prevTxn = txn;
+    })
+
+    return isRelated;
+}

@@ -1,4 +1,5 @@
-import { Chains, Banana } from '@bananahq/banana-sdk-tg-bot'
+// import { Chains, Banana } from '@bananahq/banana-sdk-tg-bot'
+import { Chains, Banana } from '@bananahq/banana-sdk-tg-bot-modified'
 // import { Chains, Banana } from '@bananahq/banana-sdk-tg-bot-wormhole'
 import { POLYGON_RPC, GNOSIS_RPC, OPTIMISM_RPC, paymasterOptions } from '../../constant.js';
 import { ethers } from 'ethers';
@@ -55,6 +56,8 @@ export const sendTransaction = async (txnConstructionResponse, userMeta) => {
         scanBaseUrl = 'https://optimistic.etherscan.io/tx/'
     }
 
+    console.log('thios is wallet ', wallet);
+
     const signer = wallet.getSigner()
 
     // let txns = transactions.map(txn => {
@@ -67,9 +70,23 @@ export const sendTransaction = async (txnConstructionResponse, userMeta) => {
     // })
 
     console.log('this is ssigner ', signer);
-    
-    const txnReceipt = await signer.sendBatchTransaction(transactions);  
-    txnHash = txnReceipt.hash; 
+
+    // const normalCalls = transactions.find(txn => txn.delegateCall === false);
+    // const delegateCalls = transactions.find(txn => txn.delegateCall === true);
+    let txnReceipt;
+
+    // console.log('normal calls ', normalCalls)
+    // console.log('delegate calls ', delegateCalls)
+
+    if(!txnConstructionResponse.delegateCall) {
+        txnReceipt = await signer.sendBatchTransaction(transactions);
+        txnHash = txnReceipt.hash;
+    }
+
+    if(txnConstructionResponse.delegateCall) {
+        txnReceipt = await signer.sendTransaction(transactions[0]);
+        txnHash = txnReceipt.hash;
+    }
 
     return {
         txnLink: `${scanBaseUrl}${txnHash}`,
